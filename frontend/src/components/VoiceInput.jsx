@@ -9,6 +9,7 @@ export default function VoiceInput({ onTranscription, onAnalysisResult, onQuesti
   const [status, setStatus] = useState('');
   const recognitionRef = useRef(null);
   const wsRef = useRef(null);
+  const hasValidTranscriptionRef = useRef(false);
 
   useEffect(() => {
     // Initialize Web Speech API
@@ -47,6 +48,7 @@ export default function VoiceInput({ onTranscription, onAnalysisResult, onQuesti
         
         // Only send if we have meaningful text
         if (text && text.length >= 3) {
+          hasValidTranscriptionRef.current = true;
           setStatus(`Heard: ${text}`);
           
           // Reset state before starting new analysis
@@ -73,6 +75,7 @@ export default function VoiceInput({ onTranscription, onAnalysisResult, onQuesti
             onTranscription(text);
           }
         } else {
+          hasValidTranscriptionRef.current = false;
           setStatus('No clear speech detected. Please try again.');
         }
       } else if (interimTranscript) {
@@ -97,7 +100,11 @@ export default function VoiceInput({ onTranscription, onAnalysisResult, onQuesti
 
     recognition.onend = () => {
       setIsListening(false);
-      setStatus('');
+      // Only clear status if we didn't have a valid transcription
+      // If we had valid speech, keep the status to show it was received
+      if (!hasValidTranscriptionRef.current) {
+        setStatus('');
+      }
     };
 
     recognitionRef.current = recognition;
@@ -116,26 +123,40 @@ export default function VoiceInput({ onTranscription, onAnalysisResult, onQuesti
   }, [onTranscription, onAnalysisResult]);
 
   const startListening = () => {
+    // Reset the valid transcription flag when starting new listening
+    hasValidTranscriptionRef.current = false;
     if (recognitionRef.current && !isListening) {
       // Initialize WebSocket connection only when starting voice input
       if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED) {
         wsRef.current = createWebSocketConnection(
           (data) => {
             // Handle WebSocket messages
-            if (data.type === 'code_chunk') {
+            if (data.status === 'received') {
+              // Question was successfully received by backend
+              hasValidTranscriptionRef.current = true;
+              setStatus(`Question received: ${data.question || 'Processing...'}`);
+            } else if (data.status === 'file_selected') {
+              // File was selected, update status
+              setStatus(`Analyzing file: ${data.file_name || 'selected file'}`);
+            } else if (data.type === 'status') {
+              // Status update from backend
+              setStatus(data.message || 'Processing...');
+            } else if (data.type === 'code_chunk') {
               if (onAnalysisResult) {
                 onAnalysisResult({ type: 'code_chunk', chunk: data.chunk });
               }
             } else if (data.type === 'execution_result') {
+              setStatus(''); // Clear status when execution completes
               if (onAnalysisResult) {
                 onAnalysisResult({ type: 'execution_result', ...data });
               }
             } else if (data.type === 'column_traceability') {
+              setStatus(''); // Clear status when workflow completes
               if (onAnalysisResult) {
                 onAnalysisResult({ type: 'column_traceability', ...data });
               }
             } else if (data.type === 'complete') {
-              setStatus('Analysis complete');
+              setStatus(''); // Clear status when workflow completes
               if (onStartLoading) {
                 onStartLoading(false);
               }

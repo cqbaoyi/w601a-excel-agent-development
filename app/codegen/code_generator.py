@@ -13,28 +13,12 @@ class CodeGenerator:
     """Generate Python code for Excel data analysis using OpenAI."""
 
     def __init__(self, openai_client):
-        """
-        Initialize the code generator.
-        
-        Args:
-            openai_client: OpenAI client instance
-        """
+        """Initialize the code generator."""
         self.openai_client = openai_client
 
     async def generate_code_stream(self, question: str, file_path: str, 
                                    intent_info: Dict, schema: Optional[Dict] = None) -> AsyncIterator[str]:
-        """
-        Stream code generation via OpenAI.
-        
-        Args:
-            question: User's question
-            file_path: Path to the Excel file
-            intent_info: Dictionary with intent, columns, and other metadata
-            schema: Optional schema information from reconstructed table
-            
-        Yields:
-            Code chunks as strings
-        """
+        """Stream code generation via OpenAI."""
         try:
             prompt = self._build_prompt(question, file_path, intent_info, schema)
             
@@ -59,18 +43,7 @@ class CodeGenerator:
             yield f"# Error generating code: {str(e)}\n"
 
     def generate_code(self, question: str, file_path: str, intent_info: Dict, schema: Optional[Dict] = None) -> str:
-        """
-        Generate code synchronously (non-streaming).
-        
-        Args:
-            question: User's question
-            file_path: Path to the Excel file
-            intent_info: Dictionary with intent, columns, and other metadata
-            schema: Optional schema information from reconstructed table
-            
-        Returns:
-            Generated Python code as string
-        """
+        """Generate code synchronously (non-streaming)."""
         try:
             prompt = self._build_prompt(question, file_path, intent_info, schema)
             
@@ -182,28 +155,17 @@ class CodeGenerator:
    - Use go.Figure with mode parameter value "lines+markers+text"
    - fig.update_layout must include title (centered), xaxis_title, yaxis_title
    - Sort X-axis data from small to large before plotting
+   - ALWAYS print the filename after saving: print(f"Chart saved to: {filename}") or print("Chart saved to: filename.html")
+   - Example: fig.write_html('chart.html'); print("Chart saved to: chart.html")
 '''
 
     def _build_prompt(self, question: str, file_path: str, intent_info: Dict, schema: Optional[Dict] = None) -> str:
-        """
-        Build the prompt for code generation.
-        
-        Args:
-            question: User's question
-            file_path: Path to Excel file
-            intent_info: Dictionary with intent, columns, metadata
-            schema: Optional schema information from reconstructed table
-            
-        Returns:
-            Formatted prompt string
-        """
+        """Build the prompt for code generation."""
         try:
-            # Use schema if provided, otherwise fall back to reading file
             if schema:
                 columns = schema.get('headers', [])
                 required_columns = intent_info.get('required_columns', columns)
                 
-                # Format schema information
                 schema_lines = []
                 schema_lines.append(f"File: {schema.get('file_name', 'unknown')}")
                 schema_lines.append(f"Sheet: {schema.get('sheet_name', 'unknown')}")
@@ -262,9 +224,9 @@ Important:
 - Always verify column existence before filtering: `if 'column_name' in df.columns:`
 - Include proper error handling with helpful messages
 - Print all results clearly
-- If charts are needed, generate interactive HTML files using plotly and save them to the current working directory (output folder)'''
+- If charts are needed, generate interactive HTML files using plotly and save them to the current working directory (output folder)
+- IMPORTANT: After saving a chart with fig.write_html(), always print the filename: print(f"Chart saved to: filename.html")'''
             else:
-                # Fallback: read file directly
                 df = pd.read_excel(file_path, sheet_name=0, nrows=5)
                 columns = list(df.columns)
                 sample_data = df.head(3).to_dict('records')
@@ -301,7 +263,8 @@ Important:
 - Always verify column existence before filtering: `if 'column_name' in df.columns:`
 - Include proper error handling with helpful messages
 - Print all results clearly
-- If charts are needed, generate interactive HTML files using plotly and save them to the current working directory (output folder)'''
+- If charts are needed, generate interactive HTML files using plotly and save them to the current working directory (output folder)
+- IMPORTANT: After saving a chart with fig.write_html(), always print the filename: print(f"Chart saved to: filename.html")'''
             
             return prompt
             
@@ -317,16 +280,7 @@ Important:
                         for i, row in enumerate(sample_data, 1))
 
     def _format_code_response(self, code: str) -> str:
-        """
-        Clean and format the generated code.
-        
-        Args:
-            code: Raw code from OpenAI
-            
-        Returns:
-            Cleaned code string
-        """
-        # Remove markdown code blocks if present
+        """Clean and format the generated code."""
         code = code.strip()
         if code.startswith("```python"):
             code = code[9:]

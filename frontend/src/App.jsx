@@ -4,6 +4,7 @@ import VoiceInput from './components/VoiceInput';
 import CodeDisplay from './components/CodeDisplay';
 import ResultsDisplay from './components/ResultsDisplay';
 import ColumnTraceability from './components/ColumnTraceability';
+import GraphDisplay from './components/GraphDisplay';
 import { createSSEConnection } from './services/api';
 
 /**
@@ -19,6 +20,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [status, setStatus] = useState('');
   const [question, setQuestion] = useState('');
+  const [graphFiles, setGraphFiles] = useState([]);
   const sseConnectionRef = useRef(null);
 
   // Cleanup SSE connection on unmount
@@ -39,9 +41,10 @@ export default function App() {
     setSuccess(false);
     setColumns([]);
     setOriginalFile('');
+    setGraphFiles([]);
     setQuestion(question);
     setIsLoading(true);
-    setStatus('Starting analysis...');
+    setStatus('Analyzing...');
 
     // Close existing SSE connection
     if (sseConnectionRef.current) {
@@ -68,13 +71,14 @@ export default function App() {
             setError(''); // Clear any previous errors on success
           }
           setSuccess(data.success || false);
+          setGraphFiles(data.graph_files || []);
           setIsLoading(false);
+          setStatus(''); // Clear status when execution completes
         } else if (data.type === 'column_traceability') {
           setColumns(data.columns_used || []);
           setOriginalFile(data.original_file || '');
-        } else if (data.type === 'complete') {
-          setStatus('Analysis complete');
           setIsLoading(false);
+          setStatus(''); // Clear status when workflow completes
           // Close SSE connection after completion to prevent reconnection
           if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
             eventSource.close();
@@ -83,6 +87,7 @@ export default function App() {
         } else if (data.type === 'error') {
           setError(data.error || 'An error occurred');
           setIsLoading(false);
+          setStatus(''); // Clear status on error
           // Close SSE connection on error to prevent reconnection
           if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
             eventSource.close();
@@ -122,6 +127,7 @@ export default function App() {
     setSuccess(false);
     setColumns([]);
     setOriginalFile('');
+    setGraphFiles([]);
   }, []);
 
   const handleVoiceAnalysisResult = useCallback((data) => {
@@ -136,6 +142,7 @@ export default function App() {
         setError(''); // Clear any previous errors on success
       }
       setSuccess(data.success || false);
+      setGraphFiles(data.graph_files || []);
       setIsLoading(false);
     } else if (data.type === 'column_traceability') {
       setColumns(data.columns_used || []);
@@ -185,6 +192,10 @@ export default function App() {
           <CodeDisplay code={code} />
           <ResultsDisplay output={output} error={error} success={success} />
         </div>
+      )}
+
+      {graphFiles.length > 0 && (
+        <GraphDisplay graphFiles={graphFiles} />
       )}
 
       {columns.length > 0 && (

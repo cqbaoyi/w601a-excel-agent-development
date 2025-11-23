@@ -1,7 +1,10 @@
 """Code execution module for safely executing generated Python code."""
 
 import logging
-from typing import Dict, Optional, Tuple
+import re
+import time
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 from jupyter_client.manager import start_new_kernel
 
@@ -20,29 +23,42 @@ class CodeExecutor:
             file_path: Path to the Excel file being analyzed
             
         Returns:
-            Dictionary with 'output' and 'error' keys
+            Dictionary with 'output', 'error', 'success', and 'graph_files' keys
         """
         kernel_manager = None
         client = None
         
+        output_dir = Path(__file__).parent.parent.parent / "output"
+        output_dir.mkdir(exist_ok=True)
+        
+        expected_html_files = self._extract_html_files_from_code(code, output_dir)
+        logger.info(f"Found {len(expected_html_files)} HTML file(s) in generated code: {expected_html_files}")
+        
         try:
-            # Create new kernel
             kernel_manager, client = start_new_kernel()
             logger.info("Jupyter kernel started")
             
-            # Prepare code with file path context
             full_code = self._prepare_code(code, file_path)
-            
-            # Execute code
             client.execute(full_code)
-            
-            # Get output
             output, error = self._capture_output(client)
+            
+            time.sleep(0.5)
+            
+            verified_files = self._verify_html_files_exist(expected_html_files, output_dir, max_retries=5)
+            html_files_from_output = self._extract_html_files_from_output(output, output_dir)
+            all_detected = set(verified_files) | set(html_files_from_output)
+            new_html_files = list(all_detected)
+            
+            if new_html_files:
+                logger.info(f"Verified {len(new_html_files)} HTML file(s): {new_html_files}")
+            elif expected_html_files:
+                logger.warning(f"Expected {len(expected_html_files)} HTML file(s) but none verified")
             
             return {
                 "output": output,
                 "error": error,
-                "success": error is None
+                "success": error is None,
+                "graph_files": new_html_files
             }
             
         except Exception as e:
@@ -50,11 +66,11 @@ class CodeExecutor:
             return {
                 "output": "",
                 "error": f"Execution failed: {str(e)}",
-                "success": False
+                "success": False,
+                "graph_files": []
             }
             
         finally:
-            # Clean up resources
             if client:
                 try:
                     client.stop_channels()
@@ -68,35 +84,18 @@ class CodeExecutor:
                     logger.error(f"Error shutting down kernel: {e}")
 
     def _prepare_code(self, code: str, file_path: str) -> str:
-        """
-        Prepare code for execution by adding necessary context.
-        
-        Args:
-            code: Original code
-            file_path: Path to Excel file
-            
-        Returns:
-            Prepared code string
-        """
+        """Prepare code for execution by adding necessary context."""
         import os
         from pathlib import Path
         
-        # Convert file_path to absolute path to avoid issues when changing working directory
         abs_file_path = Path(file_path).absolute()
-        
-        # Verify file exists before execution
         if not abs_file_path.exists():
-            logger.error(f"Excel file not found: {abs_file_path}")
-            logger.error(f"Original path provided: {file_path}")
-            raise FileNotFoundError(f"Excel file not found: {abs_file_path}. Original path: {file_path}")
+            raise FileNotFoundError(f"Excel file not found: {abs_file_path}")
         
-        # Set up output directory for generated files (charts, etc.)
         output_dir = Path(__file__).parent.parent.parent / "output"
         output_dir.mkdir(exist_ok=True)
         
-        # Ensure file_path and output_dir are available in the execution context
-        # Use str() to handle Windows paths properly - escape backslashes
-        abs_file_path_str = str(abs_file_path).replace('\\', '\\\\')  # Escape backslashes for Windows
+        abs_file_path_str = str(abs_file_path).replace('\\', '\\\\')
         
         prepended = f'''import os
 from pathlib import Path
@@ -140,25 +139,18 @@ os.chdir(str(output_dir))  # Change working directory to output folder
                 content = msg['content']
                 
                 if msg_type == 'stream':
-                    # Standard output
                     text = content.get('text', '')
                     if text:
                         output_lines.append(text)
-                        
                 elif msg_type == 'execute_result':
-                    # Execution result
                     if 'text/plain' in content.get('data', {}):
                         output_lines.append(content['data']['text/plain'])
-                        
                 elif msg_type == 'error':
-                    # Error occurred
                     traceback = content.get('traceback', [])
                     error = '\n'.join(traceback)
                     logger.error(f"Code execution error: {error}")
                     break
-                    
                 elif msg_type == 'status':
-                    # Check if execution is complete
                     if content.get('execution_state') == 'idle':
                         break
                         
@@ -168,5 +160,118 @@ os.chdir(str(output_dir))  # Change working directory to output folder
         
         output = '\n'.join(output_lines) if output_lines else "No output"
         return output, error
+    
+    def _get_html_files(self, output_dir: Path) -> List[str]:
+        """
+        Get list of HTML files in the output directory.
+        
+        Args:
+            output_dir: Path to output directory
+            
+        Returns:
+            List of HTML file names
+        """
+        try:
+            html_files = [f.name for f in output_dir.glob("*.html")]
+            return html_files
+        except Exception as e:
+            logger.error(f"Error getting HTML files: {e}")
+            return []
+    
+    def _extract_html_files_from_code(self, code: str, output_dir: Path) -> List[str]:
+        """Parse generated code to find HTML filenames before execution."""
+        html_files = []
+        try:
+            pattern1 = r'\.write_html\s*\(\s*["\']([^"\']+\.html)["\']'
+            matches1 = re.findall(pattern1, code, re.IGNORECASE | re.UNICODE)
+            
+            lines = code.split('\n')
+            var_to_file = {}
+            
+            for line in lines:
+                match = re.search(r'(\w+)\s*=\s*["\']([^"\']+\.html)["\']', line, re.IGNORECASE)
+                if match:
+                    var_name, file_name = match.groups()
+                    var_to_file[var_name] = file_name
+            
+            for line in lines:
+                match = re.search(r'\.write_html\s*\(\s*(\w+)\s*\)', line)
+                if match:
+                    var_name = match.group(1)
+                    if var_name in var_to_file:
+                        html_files.append(var_to_file[var_name])
+            
+            html_files.extend(matches1)
+            
+            seen = set()
+            unique_files = []
+            for f in html_files:
+                filename = f.split('/')[-1].split('\\')[-1]
+                if filename not in seen and filename.endswith('.html'):
+                    seen.add(filename)
+                    unique_files.append(filename)
+            
+            if unique_files:
+                logger.debug(f"Extracted {len(unique_files)} HTML file(s) from code: {unique_files}")
+            
+        except Exception as e:
+            logger.error(f"Error extracting HTML files from code: {e}", exc_info=True)
+        
+        return unique_files
+    
+    def _verify_html_files_exist(self, expected_files: List[str], output_dir: Path, max_retries: int = 5) -> List[str]:
+        """Verify expected HTML files exist after execution with retries."""
+        if not expected_files:
+            return []
+        
+        verified = []
+        for attempt in range(max_retries):
+            verified = []
+            for filename in expected_files:
+                file_path = output_dir / filename
+                try:
+                    if file_path.exists() and file_path.stat().st_size > 0 and file_path.suffix.lower() == '.html':
+                        verified.append(filename)
+                except Exception as e:
+                    logger.debug(f"Error checking file {filename}: {e}")
+            
+            if len(verified) == len(expected_files):
+                break
+            
+            if attempt < max_retries - 1:
+                time.sleep(0.3)
+        
+        if len(verified) < len(expected_files):
+            missing = set(expected_files) - set(verified)
+            logger.warning(f"Some expected HTML files not found: {missing}")
+        
+        return verified
+    
+    def _extract_html_files_from_output(self, output: str, output_dir: Path) -> List[str]:
+        """Extract HTML filenames from execution output text."""
+        html_files = []
+        try:
+            patterns = [
+                r'([\w\-_\u4e00-\u9fff]+\.html)',
+                r'["\']([^"\']+\.html)["\']',
+                r'saved\s+(?:to|as|in)\s+["\']?([^"\'\s]+\.html)["\']?',
+                r'written\s+(?:to|as|in)\s+["\']?([^"\'\s]+\.html)["\']?',
+                r'Chart\s+saved\s+to\s+["\']?([^"\'\s]+\.html)["\']?',
+            ]
+            
+            for pattern in patterns:
+                matches = re.findall(pattern, output, re.IGNORECASE)
+                for match in matches:
+                    file_path = output_dir / match
+                    if file_path.exists() and file_path.suffix.lower() == '.html':
+                        html_files.append(match)
+            
+            if html_files:
+                logger.debug(f"Found HTML files in output: {html_files}")
+                
+        except Exception as e:
+            logger.error(f"Error extracting HTML files from output: {e}")
+        
+        return html_files
 
 
