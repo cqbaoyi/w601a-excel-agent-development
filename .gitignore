@@ -214,7 +214,7 @@ file_summaries.json
 
 # Generated output files (charts, analysis results)
 output/
-*.html
+output/*.html
 
 # Node.js dependencies
 node_modules/

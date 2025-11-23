@@ -23,14 +23,15 @@ def _convert_to_serializable(obj: Any) -> Any:
     Returns:
         JSON-serializable object
     """
-    if isinstance(obj, pd.Timestamp):
+    # Check for pandas NA values first (pd.NA is a singleton, not a type)
+    if pd.isna(obj):
+        return None
+    elif isinstance(obj, pd.Timestamp):
         return obj.isoformat()
     elif isinstance(obj, datetime):
         return obj.isoformat()
     elif isinstance(obj, (pd.Int64Dtype, pd.Float64Dtype, pd.BooleanDtype)):
         return str(obj)
-    elif isinstance(obj, pd.NA):
-        return None
     elif isinstance(obj, dict):
         return {k: _convert_to_serializable(v) for k, v in obj.items()}
     elif isinstance(obj, (list, tuple)):
