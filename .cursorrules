@@ -1,0 +1,45 @@
+# Cursor Rules for Excel Agent Development
+
+## Code Style
+- Use Python 3.10+ features
+- Follow PEP 8 style guidelines
+- Use type hints where appropriate
+- Write docstrings for all functions and classes
+- Use meaningful variable and function names
+
+## File Organization
+- Keep modules focused and single-purpose
+- Place related functionality in appropriate subdirectories
+- Use __init__.py files to make packages
+- Keep frontend and backend code separate
+
+## Documentation
+- Document all public APIs
+- Include usage examples in docstrings
+- Update README.md with setup and usage instructions
+- Comment complex logic and algorithms
+
+## Error Handling
+- Use try-except blocks for all external operations
+- Provide user-friendly error messages
+- Log errors with appropriate levels
+- Handle edge cases gracefully
+
+## Security
+- Validate all user inputs
+- Sanitize file paths to prevent directory traversal
+- Use environment variables for sensitive data
+- Never execute user code without proper sandboxing
+
+## Testing
+- Write unit tests for core functionality
+- Test error cases and edge conditions
+- Test with various Excel file structures
+- Verify voice input and SSE streaming
+
+## Performance
+- Cache processed Excel metadata when possible
+- Optimize file reading operations
+- Use async/await for I/O operations
+- Minimize memory usage for large files
+
