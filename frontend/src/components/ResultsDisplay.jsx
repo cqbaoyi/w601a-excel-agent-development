@@ -21,11 +21,6 @@ export default function ResultsDisplay({ output, error, success }) {
       {output && (
         <div className="output-display">{output}</div>
       )}
-      {success && !error && (
-        <div style={{ marginTop: '10px', color: '#4CAF50', fontWeight: 'bold' }}>
-          ✓ Execution successful
-        </div>
-      )}
     </div>
   );
 }

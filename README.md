@@ -45,12 +45,18 @@ w601a-excel-agent-development/
 
 ### Backend Setup
 
-1. Install Python dependencies:
+1. Create and activate a virtual environment (recommended):
+```bash
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+2. Install Python dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-2. Create a `.env` file in the root directory:
+3. Create a `.env` file in the root directory:
 ```env
 OPENAI_API_KEY=your_openai_api_key_here
 OPENAI_BASE_URL=https://api.openai.com/v1
@@ -58,7 +64,15 @@ OPENAI_MODEL=gpt-4o-mini
 SHEETS_DIR=sheets
 ```
 
-3. Start the backend server:
+4. Place your Excel files in the `sheets/` directory (create the directory if it doesn't exist):
+```bash
+mkdir -p sheets
+# Copy your Excel files (.xlsx or .xls) to the sheets/ directory
+```
+
+**Note:** The backend server will process all Excel files in the `sheets/` directory when it starts to build a knowledge base for file selection. Make sure your files are in place before starting the server.
+
+5. Start the backend server:
 ```bash
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
@@ -84,13 +98,12 @@ The frontend will be available at `http://localhost:3000`
 
 ## Usage
 
-1. Place your Excel files in the `sheets/` directory
-2. Open the frontend application in your browser
-3. Enter a question in natural language (Chinese or English), for example:
+1. Open the frontend application in your browser
+2. Enter a question in natural language (Chinese or English), for example:
    - "Analyze sales trends in different regions"
    - "计算不同地区的销售趋势"
    - "Show me a chart of sales over time"
-4. The system will automatically:
+3. The system will automatically:
    - Parse your question
    - Select the appropriate Excel file
    - Generate Python analysis code
@@ -98,6 +111,8 @@ The frontend will be available at `http://localhost:3000`
    - Display results, graphs, and column traceability
 
 ### Voice Input
+
+Voice input uses the browser's Web Speech API to convert speech to text. The transcribed text is then sent to the backend for analysis.
 
 1. Click "Start Voice Input" button
 2. Speak your question (supports Chinese and English)

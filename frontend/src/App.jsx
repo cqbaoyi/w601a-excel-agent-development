@@ -21,20 +21,64 @@ export default function App() {
   const [status, setStatus] = useState('');
   const [question, setQuestion] = useState('');
   const [graphFiles, setGraphFiles] = useState([]);
+  const [isComplete, setIsComplete] = useState(false);
+  const [sseStreamClosed, setSseStreamClosed] = useState(false);
   const sseConnectionRef = useRef(null);
+  const renderCheckTimeoutRef = useRef(null);
 
-  // Cleanup SSE connection on unmount
-  useEffect(() => {
-    return () => {
-      if (sseConnectionRef.current) {
-        sseConnectionRef.current.close();
-        sseConnectionRef.current = null;
-      }
-    };
+  // Helper to close SSE connection
+  const closeSSEConnection = useCallback(() => {
+    if (sseConnectionRef.current && sseConnectionRef.current.readyState !== EventSource.CLOSED) {
+      sseConnectionRef.current.close();
+      sseConnectionRef.current = null;
+    }
   }, []);
 
-  const handleAnalyze = useCallback((question) => {
-    // Reset state
+  // Helper to clear all timeouts
+  const clearAllTimeouts = useCallback(() => {
+    if (renderCheckTimeoutRef.current) {
+      clearTimeout(renderCheckTimeoutRef.current);
+      renderCheckTimeoutRef.current = null;
+    }
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      closeSSEConnection();
+      clearAllTimeouts();
+    };
+  }, [closeSSEConnection, clearAllTimeouts]);
+
+  // Check if analysis is complete: SSE closed, all data received, and rendering done
+  useEffect(() => {
+    clearAllTimeouts();
+
+    if (isComplete || !sseStreamClosed) {
+      return;
+    }
+
+    const hasAllData = code.length > 0 && (output || error) && columns.length > 0;
+    
+    if (hasAllData) {
+      // Wait for React rendering and iframe loading
+      requestAnimationFrame(() => {
+        renderCheckTimeoutRef.current = setTimeout(() => {
+          const streamStillClosed = !sseConnectionRef.current || 
+            sseConnectionRef.current.readyState === EventSource.CLOSED;
+          
+          if (streamStillClosed && hasAllData) {
+            setIsLoading(false);
+            setIsComplete(true);
+            setStatus('The analysis is complete.');
+          }
+        }, 1000);
+      });
+    }
+  }, [isComplete, sseStreamClosed, code, output, error, columns, clearAllTimeouts]);
+
+  // Reset all analysis state (without affecting loading state)
+  const resetAnalysisState = useCallback(() => {
     setCode('');
     setOutput('');
     setError('');
@@ -42,15 +86,33 @@ export default function App() {
     setColumns([]);
     setOriginalFile('');
     setGraphFiles([]);
+    setIsComplete(false);
+    setSseStreamClosed(false);
+    setStatus('');
+    clearAllTimeouts();
+  }, [clearAllTimeouts]);
+
+  // Handle execution result data
+  const handleExecutionResult = useCallback((data) => {
+    setOutput(data.output || '');
+    if (data.error && !data.success) {
+      setError(data.error || '');
+    } else {
+      setError('');
+    }
+    setSuccess(data.success || false);
+    setGraphFiles(data.graph_files || []);
+    setStatus('');
+  }, []);
+
+  const handleAnalyze = useCallback((question) => {
+    // Reset state and close any existing connection
+    resetAnalysisState();
+    closeSSEConnection();
+    
+    // Start new analysis
     setQuestion(question);
     setIsLoading(true);
-    setStatus('Analyzing...');
-
-    // Close existing SSE connection
-    if (sseConnectionRef.current) {
-      sseConnectionRef.current.close();
-      sseConnectionRef.current = null;
-    }
 
     // Create new SSE connection
     const eventSource = createSSEConnection(
@@ -63,48 +125,28 @@ export default function App() {
         } else if (data.type === 'code_chunk') {
           setCode((prev) => prev + (data.chunk || ''));
         } else if (data.type === 'execution_result') {
-          setOutput(data.output || '');
-          // Only set error if execution actually failed
-          if (data.error && !data.success) {
-            setError(data.error || '');
-          } else {
-            setError(''); // Clear any previous errors on success
-          }
-          setSuccess(data.success || false);
-          setGraphFiles(data.graph_files || []);
-          setIsLoading(false);
-          setStatus(''); // Clear status when execution completes
+          handleExecutionResult(data);
         } else if (data.type === 'column_traceability') {
           setColumns(data.columns_used || []);
           setOriginalFile(data.original_file || '');
-          setIsLoading(false);
-          setStatus(''); // Clear status when workflow completes
-          // Close SSE connection after completion to prevent reconnection
-          if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
-            eventSource.close();
-            sseConnectionRef.current = null;
-          }
+          closeSSEConnection();
+          setSseStreamClosed(true);
         } else if (data.type === 'error') {
           setError(data.error || 'An error occurred');
           setIsLoading(false);
-          setStatus(''); // Clear status on error
-          // Close SSE connection on error to prevent reconnection
-          if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
-            eventSource.close();
-            sseConnectionRef.current = null;
-          }
+          setIsComplete(false);
+          setStatus('');
+          closeSSEConnection();
+          setSseStreamClosed(true);
         }
       },
       (err) => {
         console.error('SSE error:', err);
         setIsLoading(false);
-        // Close connection on error
-        if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
-          eventSource.close();
-          sseConnectionRef.current = null;
-        }
+        closeSSEConnection();
+        setSseStreamClosed(true);
+        
         // Only show connection error if we haven't received any results
-        // Use functional updates to access current state
         setCode((prevCode) => {
           setOutput((prevOutput) => {
             if (!prevOutput && !prevCode) {
@@ -118,42 +160,28 @@ export default function App() {
     );
 
     sseConnectionRef.current = eventSource;
-  }, []);
-
-  const resetState = useCallback(() => {
-    setCode('');
-    setOutput('');
-    setError('');
-    setSuccess(false);
-    setColumns([]);
-    setOriginalFile('');
-    setGraphFiles([]);
-  }, []);
+  }, [closeSSEConnection, resetAnalysisState, handleExecutionResult]);
 
   const handleVoiceAnalysisResult = useCallback((data) => {
     if (data.type === 'code_chunk') {
       setCode((prev) => prev + (data.chunk || ''));
     } else if (data.type === 'execution_result') {
-      setOutput(data.output || '');
-      // Only set error if execution actually failed
-      if (data.error && !data.success) {
-        setError(data.error || '');
-      } else {
-        setError(''); // Clear any previous errors on success
-      }
-      setSuccess(data.success || false);
-      setGraphFiles(data.graph_files || []);
-      setIsLoading(false);
+      handleExecutionResult(data);
     } else if (data.type === 'column_traceability') {
       setColumns(data.columns_used || []);
       setOriginalFile(data.original_file || '');
+      setSseStreamClosed(true);
     } else if (data.type === 'error') {
       setError(data.error || 'An error occurred');
       setIsLoading(false);
+      setIsComplete(false);
+      setSseStreamClosed(true);
     } else if (data.type === 'complete') {
       setIsLoading(false);
+      setIsComplete(true);
+      setStatus('The analysis is complete.');
     }
-  }, []);
+  }, [handleExecutionResult]);
 
   return (
     <div className="app">
@@ -169,15 +197,27 @@ export default function App() {
           onAnalysisResult={handleVoiceAnalysisResult}
           onQuestion={setQuestion}
           onStartLoading={setIsLoading}
-          onResetState={resetState}
+          onResetState={resetAnalysisState}
         />
       </div>
 
-      {status && (
-        <div className="status-message">
-          {isLoading && <span className="loading"></span>}
-          {status}
+      {isLoading && (
+        <div className="analyzing-container">
+          <div className="analyzing-animation">
+            <div className="pulse-dot"></div>
+            <div className="pulse-dot"></div>
+            <div className="pulse-dot"></div>
+          </div>
+          <span className="analyzing-text">Analyzing...</span>
         </div>
+      )}
+      
+      {status && (
+        isComplete ? (
+          <div className="completion-message">{status}</div>
+        ) : !isLoading && (
+          <div className="status-message">{status}</div>
+        )
       )}
 
       {question && (

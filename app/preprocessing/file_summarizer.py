@@ -4,12 +4,39 @@ import json
 import logging
 import os
 import re
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+
+def _convert_to_serializable(obj: Any) -> Any:
+    """
+    Convert pandas Timestamp and other non-serializable objects to strings.
+    
+    Args:
+        obj: Object to convert
+        
+    Returns:
+        JSON-serializable object
+    """
+    if isinstance(obj, pd.Timestamp):
+        return obj.isoformat()
+    elif isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, (pd.Int64Dtype, pd.Float64Dtype, pd.BooleanDtype)):
+        return str(obj)
+    elif isinstance(obj, pd.NA):
+        return None
+    elif isinstance(obj, dict):
+        return {k: _convert_to_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [_convert_to_serializable(item) for item in obj]
+    else:
+        return obj
 
 
 class FileSummarizer:
@@ -202,6 +229,8 @@ Generate a concise summary of the file's content and purpose.'''
             
             # Format sample data
             sample_data = df.head(3).to_dict('records')
+            # Convert pandas Timestamp and other non-serializable types to strings
+            sample_data = _convert_to_serializable(sample_data)
             sample_data_str = json.dumps(sample_data, ensure_ascii=False, indent=2)
             
             return {
